@@ -12,10 +12,13 @@ export function generateAndPrint(state) {
 
   const kvPct   = parseFloat(kv)       || 0;
   const discPct = parseFloat(discount) || 0;
+  // Use pre-calculated values if passed, otherwise recalculate
   const totCount = rows.reduce((s, r) => s + (parseInt(r.count) || 0), 0);
-  const totSum   = getTotalSum(rows, kvPct);
-  const discAmt  = Math.round(totSum * discPct / 100);
-  const afterDisc = totSum - discAmt;
+  const totSum   = state.totSum  !== undefined ? state.totSum  : rows.reduce((s, r) => s + (parseFloat(r.price)||0)*(parseInt(r.count)||0), 0);
+  const kvAmt    = state.kvAmt   !== undefined ? state.kvAmt   : Math.round(totSum * kvPct / 100);
+  const totWithKv = totSum + kvAmt;
+  const discAmt  = state.discAmt !== undefined ? state.discAmt : Math.round(totWithKv * discPct / 100);
+  const afterDisc = state.afterDisc !== undefined ? state.afterDisc : totWithKv - discAmt;
   const kpNum = getKpNumber();
   const ds = formatDate(date);
   const vs = formatDate(validity);
@@ -25,7 +28,7 @@ export function generateAndPrint(state) {
   // ── Tariff rows ──
   const tRows = rows.map(r => {
     const n = parseInt(r.count) || 0;
-    const p = getRowPrice(r, kvPct);
+    const p = parseFloat(r.price) || 0;
     const rt = p * n;
     const isVip = r.clinic === 'ВИП';
     const lines = buildContentLines(r);
@@ -46,20 +49,19 @@ export function generateAndPrint(state) {
 
   // ── Installment ──
   let instHTML = '';
-  if ((payment === '3' || payment === '4') && afterDisc > 0) {
-    const parts = getInstallmentParts(payment, afterDisc);
-    const pcts  = payment === '3' ? ['33%', '33%', '33%'] : ['40%', '20%', '20%', '20%'];
-    const cells = parts.map((amt, i) => {
-      const d = instDates[i] || {};
+  if ((payment === '3' || payment === '4') && afterDisc > 0 && instDates.length) {
+    const cells = instDates.map((d, i) => {
+      const pct = parseFloat(d.pct) || 0;
+      const amt = Math.round(afterDisc * pct / 100);
       const dStr = d.date ? formatDate(d.date) : '—';
       return `<div class="inst-cell">
-        <div class="ic-lbl">Платёж ${i + 1} · ${pcts[i]}</div>
+        <div class="ic-lbl">Платёж ${i + 1} · ${pct}%</div>
         <div class="ic-date">${dStr}</div>
         <div class="ic-val">${formatMoney(amt)}</div>
       </div>`;
     }).join('');
     instHTML = `<div class="p-section avoid-break"><h2>График платежей</h2>
-      <div class="inst-grid" style="grid-template-columns:repeat(${parts.length},1fr)">${cells}</div></div>`;
+      <div class="inst-grid" style="grid-template-columns:repeat(${instDates.length},1fr)">${cells}</div></div>`;
   }
 
   // ── Tasks ──
