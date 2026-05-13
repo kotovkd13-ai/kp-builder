@@ -48,18 +48,25 @@ export default function Builder({ initialData, onSave }) {
   useEffect(() => {
     const n = s.payment === '3' ? 3 : s.payment === '4' ? 4 : 0;
     if (n) {
+      const defaultPcts = s.payment === '3' ? ['33', '33', '34'] : ['40', '20', '20', '20'];
       const dates = [...s.instDates];
-      while (dates.length < n) dates.push({ date: '' });
+      while (dates.length < n) {
+        const idx = dates.length;
+        dates.push({ date: '', pct: defaultPcts[idx] || '' });
+      }
       setS(prev => ({ ...prev, instDates: dates.slice(0, n) }));
     } else {
       setS(prev => ({ ...prev, instDates: [] }));
     }
   }, [s.payment]);
 
-  const kvPct   = parseFloat(s.kv)       || 0;
+  const kvPct   = parseFloat(s.kv) || 0;
   const discPct = parseFloat(s.discount) || 0;
-  const totSum  = getTotalSum(s.rows, kvPct);
-  const discAmt = Math.round(totSum * discPct / 100);
+  const totSum  = getTotalSum(s.rows, 0); // base sum from manual prices
+  const kvAmt   = Math.round(totSum * kvPct / 100);
+  const totWithKv = totSum + kvAmt;       // KV added on top (hidden from client)
+  const discAmt = Math.round(totWithKv * discPct / 100);
+  const afterDisc = totWithKv - discAmt;  // final sum client sees
   const totCount = s.rows.reduce((acc, r) => acc + (parseInt(r.count) || 0), 0);
 
   const errors = touched ? REQUIRED_FIELDS.reduce((acc, f) => {
@@ -91,7 +98,7 @@ export default function Builder({ initialData, onSave }) {
     };
     const id = rowCounter + 1;
     setRowCounter(id);
-    setS(prev => ({ ...prev, rows: [...prev.rows, { ...newRow(id), ...presets[key], priceOverride: '' }] }));
+    setS(prev => ({ ...prev, rows: [...prev.rows, { ...newRow(id), ...presets[key], price: '' }] }));
     setShowPresets(false);
   }, [rowCounter]);
 
@@ -141,7 +148,7 @@ export default function Builder({ initialData, onSave }) {
       id: Date.now(),
       client: s.client || 'Без имени',
       date: new Date().toLocaleDateString('ru-RU'),
-      total: totSum,
+      total: afterDisc > 0 ? afterDisc : totSum,
       count: totCount,
       data: { ...s, loadKey: Date.now() },
     };
@@ -153,10 +160,8 @@ export default function Builder({ initialData, onSave }) {
   const handlePrint = () => {
     setTouched(true);
     if (!isValid) return;
-    generateAndPrint(s);
+    generateAndPrint({ ...s, totSum, kvAmt, discAmt, afterDisc });
   };
-
-  const installPcts = s.payment === '3' ? ['33%', '33%', '33%'] : ['40%', '20%', '20%', '20%'];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -260,44 +265,83 @@ export default function Builder({ initialData, onSave }) {
             </Field>
 
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--rs)', padding: '10px 12px', marginTop: 4 }}>
+
+              {/* СКИДКА */}
               <div style={{ fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>Скидка</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <input type="number" value={s.discount} onChange={e => set('discount', e.target.value)} min="0" max="100" step="0.5"
                   style={{ width: 70, padding: '5px 8px', border: '1px solid #fbbf24', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 13, fontWeight: 700, background: 'transparent', color: 'var(--text)' }} />
                 <span style={{ fontWeight: 700, color: '#92400e' }}>%</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>
                   {discAmt > 0 ? `= −${formatMoney(discAmt)}` : '= 0 руб.'}
                 </span>
               </div>
+
+              {/* КВ */}
               <div style={{ fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>КВ (не отображается в КП)</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input type="number" value={s.kv} onChange={e => set('kv', e.target.value)} min="0" max="100" step="0.5"
                   style={{ width: 70, padding: '5px 8px', border: '1px solid #fbbf24', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 13, fontWeight: 700, background: 'transparent', color: 'var(--text)' }} />
                 <span style={{ fontWeight: 700, color: '#92400e' }}>%</span>
-                <span style={{ fontSize: 11, color: '#92400e' }}>накидывается на цену</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>
+                  {kvAmt > 0 ? `= +${formatMoney(kvAmt)}` : '= 0 руб.'}
+                </span>
               </div>
+
+              {/* ИТОГ */}
+              {(discPct > 0 || kvPct > 0) && totSum > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #fbbf24' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#92400e', marginBottom: 2 }}>
+                    <span>База</span><span style={{ fontWeight: 700 }}>{formatMoney(totSum)}</span>
+                  </div>
+                  {kvPct > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#92400e', marginBottom: 2 }}>
+                    <span>+ КВ {kvPct}%</span><span style={{ fontWeight: 700 }}>+{formatMoney(kvAmt)}</span>
+                  </div>}
+                  {discPct > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#92400e', marginBottom: 2 }}>
+                    <span>− Скидка {discPct}%</span><span style={{ fontWeight: 700 }}>−{formatMoney(discAmt)}</span>
+                  </div>}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#92400e', fontWeight: 800, marginTop: 4 }}>
+                    <span>Итого клиенту</span><span>{formatMoney(afterDisc)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* РАССРОЧКА */}
             {(s.payment === '3' || s.payment === '4') && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 7 }}>Даты платежей</div>
-                {s.instDates.map((d, i) => (
-                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>Платёж {i+1} ({installPcts[i]})</span>
-                    <input type="date" value={d.date}
-                      onChange={e => { const next = [...s.instDates]; next[i] = { ...next[i], date: e.target.value }; set('instDates', next); }}
-                      style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 11, color: 'var(--text)', background: 'var(--white)' }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gd)' }}>
-                      {totSum > 0 ? (() => {
-                        const after = totSum - discAmt;
-                        const parts = s.payment === '3'
-                          ? [Math.round(after/3), Math.round(after/3), after - Math.round(after/3)*2]
-                          : [Math.round(after*.4), Math.round(after*.2), Math.round(after*.2), after - Math.round(after*.4) - Math.round(after*.2)*2];
-                        return formatMoney(parts[i] || 0);
-                      })() : '—'}
-                    </span>
-                  </div>
-                ))}
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 7 }}>Даты и % платежей</div>
+                {s.instDates.map((d, i) => {
+                  const pct = parseFloat(d.pct) || 0;
+                  const amt = afterDisc > 0 ? Math.round(afterDisc * pct / 100) : 0;
+                  return (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 60px 1fr 90px', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{i+1}</span>
+                      <div style={{ position: 'relative' }}>
+                        <input type="number" value={d.pct}
+                          onChange={e => { const next = [...s.instDates]; next[i] = { ...next[i], pct: e.target.value }; set('instDates', next); }}
+                          placeholder="0" min="0" max="100" step="1"
+                          style={{ width: '100%', padding: '5px 20px 5px 6px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 11, color: 'var(--text)', background: 'var(--white)', fontWeight: 700 }} />
+                        <span style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--muted)', pointerEvents: 'none' }}>%</span>
+                      </div>
+                      <input type="date" value={d.date}
+                        onChange={e => { const next = [...s.instDates]; next[i] = { ...next[i], date: e.target.value }; set('instDates', next); }}
+                        style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 11, color: 'var(--text)', background: 'var(--white)' }} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gd)', textAlign: 'right' }}>
+                        {amt > 0 ? formatMoney(amt) : '—'}
+                      </span>
+                    </div>
+                  );
+                })}
+                {/* Проверка суммы % */}
+                {(() => {
+                  const total = s.instDates.reduce((s, d) => s + (parseFloat(d.pct) || 0), 0);
+                  return total > 0 && total !== 100 ? (
+                    <div style={{ fontSize: 10, color: total > 100 ? 'var(--red)' : 'var(--muted)', fontWeight: 600 }}>
+                      Сумма %: {total}% {total > 100 ? '— превышает 100%!' : `— осталось ${100 - total}%`}
+                    </div>
+                  ) : null;
+                })()}
               </div>
             )}
           </Card>
@@ -350,7 +394,7 @@ export default function Builder({ initialData, onSave }) {
             {[
               { label: 'Позиций',  val: s.rows.length },
               { label: 'Доступов', val: totCount },
-              { label: 'Итого',    val: totSum > 0 ? formatMoney(totSum) : '0 руб.', green: true },
+              { label: 'Итого клиенту', val: afterDisc > 0 ? formatMoney(afterDisc) : totSum > 0 ? formatMoney(totSum) : '0 руб.', green: true },
             ].map(st => (
               <div key={st.label} style={{ background: 'var(--white)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '12px 14px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{st.label}</div>
