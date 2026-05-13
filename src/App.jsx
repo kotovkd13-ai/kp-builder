@@ -5,6 +5,9 @@ import History from './components/History';
 
 const STORAGE_KEY = 'kp_history_v2';
 
+const PASSWORD = 'britney';
+const AUTH_KEY = 'kp_auth';
+
 function loadHistory() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
   catch { return []; }
