@@ -57,7 +57,7 @@ export default function Builder({ initialData, onSave }) {
     } else {
       setS(prev => ({ ...prev, instDates: [] }));
     }
-  }, [s.payment]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.payment]); // eslint-disable-line
 
   // ── Derived totals ──
   const totCount  = s.rows.reduce((acc, r) => acc + (parseInt(r.count) || 0), 0);
