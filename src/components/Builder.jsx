@@ -2,29 +2,29 @@ import { useState, useEffect, useCallback } from 'react';
 import { Btn, Card, CardHd, Field, Input, Select, Textarea, Badge } from './ui';
 import TariffTable from './TariffTable';
 import CompareTable from './CompareTable';
-import { getTotalSum, formatMoney, newRow } from '../utils/calc';
+import { formatMoney, newRow } from '../utils/calc';
 import { generateAndPrint } from '../utils/print';
 
 const REQUIRED_FIELDS = ['client', 'date', 'validity', 'manager', 'phone'];
 
 function initState(data) {
   return {
-    client: data?.client || '',
-    inn: data?.inn || '',
-    date: data?.date || new Date().toISOString().split('T')[0],
-    validity: data?.validity || '',
-    manager: data?.manager || '',
-    phone: data?.phone || '',
-    email: data?.email || '',
-    maxUser: data?.maxUser || '',
-    mnote: data?.mnote || '',
-    payment: data?.payment || 'standard',
-    discount: data?.discount || '0',
-    kv: data?.kv || '0',
-    instDates: data?.instDates || [],
-    rows: data?.rows || [],
+    client:     data?.client     || '',
+    inn:        data?.inn        || '',
+    date:       data?.date       || new Date().toISOString().split('T')[0],
+    validity:   data?.validity   || '',
+    manager:    data?.manager    || '',
+    phone:      data?.phone      || '',
+    email:      data?.email      || '',
+    maxUser:    data?.maxUser    || '',
+    mnote:      data?.mnote      || '',
+    payment:    data?.payment    || 'standard',
+    discount:   data?.discount   || '0',
+    kv:         data?.kv         || '0',
+    instDates:  data?.instDates  || [],
+    rows:       data?.rows       || [],
     taskBlocks: data?.taskBlocks || [],
-    scBlocks: data?.scBlocks || [],
+    scBlocks:   data?.scBlocks   || [],
   };
 }
 
@@ -40,49 +40,47 @@ export default function Builder({ initialData, onSave }) {
   const [touched, setTouched] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => { if (initialData) { setS(initState(initialData)); } }, [initialData]);
+  useEffect(() => { if (initialData) setS(initState(initialData)); }, [initialData]);
 
   const set = useCallback((key, val) => setS(prev => ({ ...prev, [key]: val })), []);
 
-  // Payment installment dates sync
+  // Sync installment slots when payment format changes
   useEffect(() => {
     const n = s.payment === '3' ? 3 : s.payment === '4' ? 4 : 0;
     if (n) {
       const defaultPcts = s.payment === '3' ? ['33', '33', '34'] : ['40', '20', '20', '20'];
-      const dates = [...s.instDates];
-      while (dates.length < n) {
-        const idx = dates.length;
-        dates.push({ date: '', pct: defaultPcts[idx] || '' });
-      }
-      setS(prev => ({ ...prev, instDates: dates.slice(0, n) }));
+      setS(prev => {
+        const existing = prev.instDates || [];
+        const next = Array.from({ length: n }, (_, i) => existing[i] || { date: '', pct: defaultPcts[i] });
+        return { ...prev, instDates: next };
+      });
     } else {
       setS(prev => ({ ...prev, instDates: [] }));
     }
-  }, [s.payment]);
+  }, [s.payment]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const kvPct   = parseFloat(s.kv) || 0;
-  const discPct = parseFloat(s.discount) || 0;
-  const totSum  = getTotalSum(s.rows, 0); // base sum from manual prices
-  const kvAmt   = Math.round(totSum * kvPct / 100);
-  const totWithKv = totSum + kvAmt;       // KV added on top (hidden from client)
-  const discAmt = Math.round(totWithKv * discPct / 100);
-  const afterDisc = totWithKv - discAmt;  // final sum client sees
-  const totCount = s.rows.reduce((acc, r) => acc + (parseInt(r.count) || 0), 0);
+  // ── Derived totals ──
+  const totCount  = s.rows.reduce((acc, r) => acc + (parseInt(r.count) || 0), 0);
+  const totSum    = s.rows.reduce((acc, r) => acc + (parseFloat(r.price) || 0) * (parseInt(r.count) || 0), 0);
+  const kvPct     = parseFloat(s.kv)       || 0;
+  const discPct   = parseFloat(s.discount) || 0;
+  const kvAmt     = Math.round(totSum * kvPct / 100);
+  const totWithKv = totSum + kvAmt;
+  const discAmt   = Math.round(totWithKv * discPct / 100);
+  const afterDisc = totWithKv - discAmt;
 
-  const errors = touched ? REQUIRED_FIELDS.reduce((acc, f) => {
-    if (!s[f].trim()) acc[f] = 'Обязательное поле';
-    return acc;
-  }, {}) : {};
+  // ── Validation ──
+  const errors  = touched ? REQUIRED_FIELDS.reduce((acc, f) => { if (!s[f].trim()) acc[f] = 'Обязательное поле'; return acc; }, {}) : {};
   const hasRows = s.rows.some(r => (parseInt(r.count) || 0) > 0);
   const isValid = Object.keys(errors).length === 0 && hasRows;
 
+  // ── Progress ──
   const progress = (() => {
     const checks = [...REQUIRED_FIELDS.map(f => !!s[f].trim()), hasRows];
-    const done = checks.filter(Boolean).length;
-    return Math.round((done / checks.length) * 100);
+    return Math.round(checks.filter(Boolean).length / checks.length * 100);
   })();
 
-  // Row ops
+  // ── Row ops ──
   const addRow = useCallback(() => {
     const id = rowCounter + 1;
     setRowCounter(id);
@@ -91,14 +89,14 @@ export default function Builder({ initialData, onSave }) {
 
   const addPreset = useCallback((key) => {
     const presets = {
-      base:     { name: 'Базовый',           region: 'РФ',     clinic: 'Стандарт', ochnye: 'bezlimit',  dom: 'no',      stom: 'no',   checkup: 'no',  obs: 'yes',    anal: 'limit',   semya: 'no',  psikh: 'no',       gosp: 'no'  },
-      standard: { name: 'Стандарт',          region: 'РФ',     clinic: 'Стандарт', ochnye: 'bezlimit',  dom: 'no',      stom: 'base', checkup: 'no',  obs: 'kt_mrt', anal: 'bezlimit', semya: 'yes', psikh: 'no',       gosp: 'esp' },
-      extended: { name: 'Расширенный',       region: 'РФ',     clinic: 'Бизнес',   ochnye: 'app_rassh', dom: '2',       stom: 'rassh',checkup: 'yes', obs: 'inc',    anal: 'inc',      semya: 'yes', psikh: '4',        gosp: 'pesp'},
-      vip:      { name: 'VIP / Руководство', region: 'Москва', clinic: 'ВИП',      ochnye: 'app_rassh', dom: 'bezlimit',stom: 'rassh',checkup: 'yes', obs: 'inc',    anal: 'inc',      semya: 'yes', psikh: 'bezlimit', gosp: 'pesp'},
+      base:     { name: 'Базовый',           region: 'РФ',     clinic: 'Стандарт', ochnye: 'bezlimit',  dom: 'no',      stom: 'no',    checkup: 'no',  obs: 'yes',    anal: 'limit',   semya: 'no',  psikh: 'no',       gosp: 'no'   },
+      standard: { name: 'Стандарт',          region: 'РФ',     clinic: 'Стандарт', ochnye: 'bezlimit',  dom: 'no',      stom: 'base',  checkup: 'no',  obs: 'kt_mrt', anal: 'bezlimit', semya: 'yes', psikh: 'no',       gosp: 'esp'  },
+      extended: { name: 'Расширенный',       region: 'РФ',     clinic: 'Бизнес',   ochnye: 'app_rassh', dom: '2',       stom: 'rassh', checkup: 'yes', obs: 'inc',    anal: 'inc',      semya: 'yes', psikh: '4',        gosp: 'pesp' },
+      vip:      { name: 'VIP / Руководство', region: 'Москва', clinic: 'ВИП',      ochnye: 'app_rassh', dom: 'bezlimit',stom: 'rassh', checkup: 'yes', obs: 'inc',    anal: 'inc',      semya: 'yes', psikh: 'bezlimit', gosp: 'pesp' },
     };
     const id = rowCounter + 1;
     setRowCounter(id);
-    setS(prev => ({ ...prev, rows: [...prev.rows, { ...newRow(id), ...presets[key], price: '' }] }));
+    setS(prev => ({ ...prev, rows: [...prev.rows, { ...newRow(id), ...presets[key] }] }));
     setShowPresets(false);
   }, [rowCounter]);
 
@@ -118,6 +116,7 @@ export default function Builder({ initialData, onSave }) {
   }, []);
 
   const removeRow = useCallback((id) => setS(prev => ({ ...prev, rows: prev.rows.filter(r => r.id !== id) })), []);
+
   const dupRow = useCallback((id) => {
     const newId = rowCounter + 1;
     setRowCounter(newId);
@@ -130,7 +129,7 @@ export default function Builder({ initialData, onSave }) {
     });
   }, [rowCounter]);
 
-  // Block ops
+  // ── Block ops ──
   const addBlock = useCallback((type) => {
     const id = blockCounter + 1;
     setBlockCounter(id);
@@ -141,18 +140,18 @@ export default function Builder({ initialData, onSave }) {
     setS(prev => ({ ...prev, [type]: prev[type].map(b => b.id === id ? { ...b, [key]: val } : b) }));
   }, []);
 
+  // ── Save / Print ──
   const handleSave = () => {
     setTouched(true);
     if (!isValid) return;
-    const entry = {
+    onSave({
       id: Date.now(),
       client: s.client || 'Без имени',
       date: new Date().toLocaleDateString('ru-RU'),
       total: afterDisc > 0 ? afterDisc : totSum,
       count: totCount,
       data: { ...s, loadKey: Date.now() },
-    };
-    onSave(entry);
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -195,7 +194,10 @@ export default function Builder({ initialData, onSave }) {
               <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg,var(--g),var(--g2))', borderRadius: 3, transition: 'width .4s' }} />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 8 }}>
-              {[...REQUIRED_FIELDS.map(f => ({ label: { client: 'Наименование', date: 'Дата КП', validity: 'Срок действия', manager: 'Менеджер', phone: 'Телефон' }[f], done: !!s[f].trim() })), { label: 'Тарифные позиции', done: hasRows }].map(c => (
+              {[
+                ...REQUIRED_FIELDS.map(f => ({ label: { client:'Наименование', date:'Дата КП', validity:'Срок действия', manager:'Менеджер', phone:'Телефон' }[f], done: !!s[f].trim() })),
+                { label: 'Тарифные позиции', done: hasRows },
+              ].map(c => (
                 <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--muted)' }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: c.done ? 'var(--g)' : 'var(--border)', flexShrink: 0 }} />
                   {c.label}
@@ -266,9 +268,9 @@ export default function Builder({ initialData, onSave }) {
 
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--rs)', padding: '10px 12px', marginTop: 4 }}>
 
-              {/* СКИДКА */}
+              {/* Скидка */}
               <div style={{ fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>Скидка</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                 <input type="number" value={s.discount} onChange={e => set('discount', e.target.value)} min="0" max="100" step="0.5"
                   style={{ width: 70, padding: '5px 8px', border: '1px solid #fbbf24', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 13, fontWeight: 700, background: 'transparent', color: 'var(--text)' }} />
                 <span style={{ fontWeight: 700, color: '#92400e' }}>%</span>
@@ -288,41 +290,43 @@ export default function Builder({ initialData, onSave }) {
                 </span>
               </div>
 
-              {/* ИТОГ */}
+              {/* Итоговый расчёт */}
               {(discPct > 0 || kvPct > 0) && totSum > 0 && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #fbbf24' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#92400e', marginBottom: 2 }}>
-                    <span>База</span><span style={{ fontWeight: 700 }}>{formatMoney(totSum)}</span>
-                  </div>
-                  {kvPct > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#92400e', marginBottom: 2 }}>
-                    <span>+ КВ {kvPct}%</span><span style={{ fontWeight: 700 }}>+{formatMoney(kvAmt)}</span>
-                  </div>}
-                  {discPct > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#92400e', marginBottom: 2 }}>
-                    <span>− Скидка {discPct}%</span><span style={{ fontWeight: 700 }}>−{formatMoney(discAmt)}</span>
-                  </div>}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#92400e', fontWeight: 800, marginTop: 4 }}>
+                  {kvPct > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#92400e', marginBottom: 3 }}>
+                      <span>+ КВ {kvPct}%</span><span style={{ fontWeight: 700 }}>+{formatMoney(kvAmt)}</span>
+                    </div>
+                  )}
+                  {discPct > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#92400e', marginBottom: 3 }}>
+                      <span>− Скидка {discPct}%</span><span style={{ fontWeight: 700 }}>−{formatMoney(discAmt)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#92400e', fontWeight: 800, marginTop: 4, paddingTop: 4, borderTop: '1px solid #fbbf24' }}>
                     <span>Итого клиенту</span><span>{formatMoney(afterDisc)}</span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* РАССРОЧКА */}
+            {/* Рассрочка */}
             {(s.payment === '3' || s.payment === '4') && (
               <div style={{ marginTop: 10 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 7 }}>Даты и % платежей</div>
                 {s.instDates.map((d, i) => {
                   const pct = parseFloat(d.pct) || 0;
-                  const amt = afterDisc > 0 ? Math.round(afterDisc * pct / 100) : 0;
+                  const finalAmt = afterDisc > 0 ? afterDisc : totSum;
+                  const amt = finalAmt > 0 ? Math.round(finalAmt * pct / 100) : 0;
                   return (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '28px 60px 1fr 90px', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{i+1}</span>
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '24px 68px 1fr 90px', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textAlign: 'center' }}>{i + 1}</span>
                       <div style={{ position: 'relative' }}>
                         <input type="number" value={d.pct}
                           onChange={e => { const next = [...s.instDates]; next[i] = { ...next[i], pct: e.target.value }; set('instDates', next); }}
-                          placeholder="0" min="0" max="100" step="1"
-                          style={{ width: '100%', padding: '5px 20px 5px 6px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 11, color: 'var(--text)', background: 'var(--white)', fontWeight: 700 }} />
-                        <span style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--muted)', pointerEvents: 'none' }}>%</span>
+                          placeholder="0" min="0" max="100"
+                          style={{ width: '100%', padding: '5px 22px 5px 6px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 11, color: 'var(--text)', background: 'var(--white)', fontWeight: 700 }} />
+                        <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--muted)', pointerEvents: 'none' }}>%</span>
                       </div>
                       <input type="date" value={d.date}
                         onChange={e => { const next = [...s.instDates]; next[i] = { ...next[i], date: e.target.value }; set('instDates', next); }}
@@ -333,14 +337,14 @@ export default function Builder({ initialData, onSave }) {
                     </div>
                   );
                 })}
-                {/* Проверка суммы % */}
                 {(() => {
-                  const total = s.instDates.reduce((s, d) => s + (parseFloat(d.pct) || 0), 0);
-                  return total > 0 && total !== 100 ? (
-                    <div style={{ fontSize: 10, color: total > 100 ? 'var(--red)' : 'var(--muted)', fontWeight: 600 }}>
-                      Сумма %: {total}% {total > 100 ? '— превышает 100%!' : `— осталось ${100 - total}%`}
+                  const total = s.instDates.reduce((acc, d) => acc + (parseFloat(d.pct) || 0), 0);
+                  if (!total) return null;
+                  return (
+                    <div style={{ fontSize: 10, fontWeight: 600, color: total > 100 ? 'var(--red)' : total === 100 ? 'var(--g)' : 'var(--muted)' }}>
+                      {total === 100 ? 'Сумма %: 100% ✓' : total > 100 ? `Сумма %: ${total}% — превышает 100%!` : `Сумма %: ${total}% — осталось ${100 - total}%`}
                     </div>
-                  ) : null;
+                  );
                 })()}
               </div>
             )}
@@ -357,8 +361,10 @@ export default function Builder({ initialData, onSave }) {
               <div key={b.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--rs)', padding: '10px 12px', marginBottom: 6, background: 'var(--bg)', position: 'relative' }}>
                 <button onClick={() => removeBlock('taskBlocks', b.id)} style={{ position: 'absolute', top: 8, right: 8, width: 20, height: 20, border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 12 }}>&#10005;</button>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                  <input value={b.title} onChange={e => updateBlock('taskBlocks', b.id, 'title', e.target.value)} placeholder="Задача" style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, fontWeight: 700, background: 'var(--white)', color: 'var(--text)', outline: 'none' }} />
-                  <input value={b.body}  onChange={e => updateBlock('taskBlocks', b.id, 'body',  e.target.value)} placeholder="Описание" style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, background: 'var(--white)', color: 'var(--text)', outline: 'none' }} />
+                  <input value={b.title} onChange={e => updateBlock('taskBlocks', b.id, 'title', e.target.value)} placeholder="Задача"
+                    style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, fontWeight: 700, background: 'var(--white)', color: 'var(--text)', outline: 'none' }} />
+                  <input value={b.body} onChange={e => updateBlock('taskBlocks', b.id, 'body', e.target.value)} placeholder="Описание"
+                    style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, background: 'var(--white)', color: 'var(--text)', outline: 'none' }} />
                 </div>
               </div>
             ))}
@@ -374,8 +380,10 @@ export default function Builder({ initialData, onSave }) {
             {s.scBlocks.map(b => (
               <div key={b.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--rs)', padding: '10px 12px', marginBottom: 6, background: 'var(--bg)', position: 'relative' }}>
                 <button onClick={() => removeBlock('scBlocks', b.id)} style={{ position: 'absolute', top: 8, right: 8, width: 20, height: 20, border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 12 }}>&#10005;</button>
-                <input value={b.title} onChange={e => updateBlock('scBlocks', b.id, 'title', e.target.value)} placeholder="Заголовок условия" style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, fontWeight: 700, background: 'var(--white)', color: 'var(--text)', outline: 'none', marginBottom: 5 }} />
-                <textarea value={b.body} onChange={e => updateBlock('scBlocks', b.id, 'body', e.target.value)} placeholder="Описание условия" style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, background: 'var(--white)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 60 }} />
+                <input value={b.title} onChange={e => updateBlock('scBlocks', b.id, 'title', e.target.value)} placeholder="Заголовок условия"
+                  style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, fontWeight: 700, background: 'var(--white)', color: 'var(--text)', outline: 'none', marginBottom: 5 }} />
+                <textarea value={b.body} onChange={e => updateBlock('scBlocks', b.id, 'body', e.target.value)} placeholder="Описание условия"
+                  style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'Manrope,sans-serif', fontSize: 12, background: 'var(--white)', color: 'var(--text)', outline: 'none', resize: 'vertical', minHeight: 60 }} />
               </div>
             ))}
           </Card>
@@ -392,9 +400,9 @@ export default function Builder({ initialData, onSave }) {
           {/* STATS */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
             {[
-              { label: 'Позиций',  val: s.rows.length },
-              { label: 'Доступов', val: totCount },
-              { label: 'Итого клиенту', val: afterDisc > 0 ? formatMoney(afterDisc) : totSum > 0 ? formatMoney(totSum) : '0 руб.', green: true },
+              { label: 'Позиций',      val: s.rows.length },
+              { label: 'Доступов',     val: totCount },
+              { label: 'Итого клиенту', val: (afterDisc > 0 ? afterDisc : totSum) > 0 ? formatMoney(afterDisc > 0 ? afterDisc : totSum) : '0 руб.', green: true },
             ].map(st => (
               <div key={st.label} style={{ background: 'var(--white)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: '12px 14px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{st.label}</div>
@@ -409,7 +417,14 @@ export default function Builder({ initialData, onSave }) {
               Тарифные позиции
               <Badge variant="g" style={{ marginLeft: 'auto' }}>{s.rows.length} поз.</Badge>
             </CardHd>
-            <TariffTable rows={s.rows} kvPct={kvPct} totCount={totCount} totSum={totSum} onUpdate={updateRow} onRemove={removeRow} onDup={dupRow} />
+            <TariffTable
+              rows={s.rows}
+              totCount={totCount}
+              totSum={totSum}
+              onUpdate={updateRow}
+              onRemove={removeRow}
+              onDup={dupRow}
+            />
             <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
               <Btn variant="secondary" onClick={addRow} style={{ flex: 1, justifyContent: 'center' }}>+ Пустая позиция</Btn>
               <Btn variant="ghost" onClick={() => setShowPresets(p => !p)} style={{ flex: 1, justifyContent: 'center' }}>Шаблоны</Btn>
@@ -435,7 +450,7 @@ export default function Builder({ initialData, onSave }) {
                   {showCompare ? 'Скрыть' : 'Показать'}
                 </Btn>
               </CardHd>
-              {showCompare && <CompareTable rows={s.rows} kvPct={kvPct} />}
+              {showCompare && <CompareTable rows={s.rows} />}
             </Card>
           )}
 

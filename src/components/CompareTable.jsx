@@ -1,4 +1,4 @@
-import { getRowPrice, formatMoney } from '../utils/calc';
+import { formatMoney } from '../utils/calc';
 import { COMPARE_OPTIONS } from '../data/tariffs';
 
 const LABELS = {
@@ -13,7 +13,7 @@ const LABELS = {
   gosp:    { esp:'ЭСП',pesp:'ПЭСП' },
 };
 
-export default function CompareTable({ rows, kvPct }) {
+export default function CompareTable({ rows }) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -58,7 +58,7 @@ export default function CompareTable({ rows, kvPct }) {
             <td style={{ background: 'var(--gd)', color: '#fff', padding: '8px 10px', fontWeight: 800 }}>Цена / чел.</td>
             {rows.map(r => (
               <td key={r.id} style={{ background: 'var(--g)', color: '#fff', fontWeight: 800, padding: '8px 10px', textAlign: 'center' }}>
-                {formatMoney(getRowPrice(r, kvPct))}
+                {r.price ? formatMoney(parseFloat(r.price)) : '—'}
               </td>
             ))}
           </tr>
@@ -66,9 +66,10 @@ export default function CompareTable({ rows, kvPct }) {
             <td style={{ background: 'var(--gd)', color: '#fff', padding: '8px 10px', fontWeight: 800 }}>Итого</td>
             {rows.map(r => {
               const n = parseInt(r.count) || 0;
+              const p = parseFloat(r.price) || 0;
               return (
                 <td key={r.id} style={{ background: 'var(--g)', color: '#fff', fontWeight: 800, padding: '8px 10px', textAlign: 'center' }}>
-                  {formatMoney(getRowPrice(r, kvPct) * n)}
+                  {p > 0 ? formatMoney(p * n) : '—'}
                   <br />
                   <small style={{ fontSize: 9, opacity: 0.7 }}>{n} чел.</small>
                 </td>
